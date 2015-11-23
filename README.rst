@@ -4,3 +4,6 @@
 
 Software requirements
 =====================
+
+- Snakemake (>= 3.5)
+- libLAS with laszip support
