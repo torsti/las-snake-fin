@@ -8,15 +8,22 @@ min_version ('3.5')
 
 HTTP = HTTPRemoteProvider()
 
+SHEET_DICT = [{'name': 'L3231D2', 'year': '2015'}]
+SHEETS = [s['year'] + '/' + s['name'][:4] + '/1/' + s['name'] for s in SHEET_DICT]
+CLIPS = [s['name'][:2] + '/' + s['name'][:3] + '/' + s['name'][:5] + 'L' if s['name'][-2:-1] in ['A', 'B', 'C', 'D'] else 'R' + '_mtk' for s in SHEET_DICT]
+
+def clipregion (wildcards):
+    return ['mtk/' + c + '.shp' for c in CLIPS if wildcards.sheet[-7:-2] in c]
+
 rule all:
-    input: 'output/merged.relief/2015/L323/L3231D2.tif'
+    input: expand ('output/merged.relief/{sheet}.tif', sheet = SHEETS)
 
 rule merged_relief:
     input:
-        color_relief = 'output/color.relief/{year}/{region}/{sheet}.tif',
-        hillshade = 'output/shaded.relief/{year}/{region}/{sheet}.tif',
-        slope_relief = 'output/slope_relief/{year}/{region}/{sheet}.tif'
-    output: 'output/merged.relief/{year}/{region}/{sheet}.tif'
+        color_relief = 'output/color.relief/{sheet}.tif',
+        hillshade = 'output/shaded.relief/{sheet}.tif',
+        slope_relief = 'output/slope_relief/{sheet}.tif'
+    output: 'output/merged.relief/{sheet}.tif'
     shell: '''
         listgeo {input.color_relief} > .meta.txt &&
         convert -gamma .5 {input.hillshade} .tmp.tif &&
@@ -25,40 +32,43 @@ rule merged_relief:
         rm .meta.txt .tmp.tif'''
 
 rule slope_relief:
-    input: 'output/dem/{year}/{region}/{sheet}.tif'
+    input: 'output/dem/{sheet}.tif'
     output: rules.merged_relief.input.slope_relief
     shell: '''
         gdaldem slope {input} {output} &&
         gdaldem color-relief {output} color_slope.txt {output}
     '''
 
-
-
 rule color_relief:
-    input: 'output/dem/{year}/{region}/{sheet}.tif'
+    input: 'output/dem/{sheet}.tif'
     output: rules.merged_relief.input.color_relief
     shell: 'gdaldem color-relief "{input}" color_relief.txt "{output}"'
 
 rule hillshade:
-    input: 'output/dem/{year}/{region}/{sheet}.tif'
+    input: 'output/dem/{sheet}.tif'
     output: rules.merged_relief.input.hillshade
     shell: 'gdaldem hillshade "{input}" "{output}"'
 
 rule dem:
     input:
-        shp = 'output/shp/{year}/{region}/{sheet}.shp',
-        las = 'las/{year}/{region}/{sheet}.las'
+        shp = 'output/shp/{sheet}.shp',
+        las = 'output/las/{sheet}.las'
+        #clip_region = clipregion
     output: rules.hillshade.input
     params:
         output_type = "Float32",
         algorithm = "nearest:radius1=10:radius2=10",
         resolution = "1"
     run:
-        e = [str (round (float (c))) for c in search ('(\d+[.]\d+), (\d+[.]\d+), (\d+[.]\d+), (\d+[.]\d+)', [l.decode () for l in check_output(['lasinfo', format ('{input.las}')]).splitlines() if 'Bounding Box:' in l.decode ()][0]).groups ()]
+        lasinfo = check_output(['lasinfo', format ('{input.las}')])
+        e = [str (round (float (c))) for c in search ('(\d+[.]\d+), (\d+[.]\d+), (\d+[.]\d+), (\d+[.]\d+)', [l.decode () for l in lasinfo.splitlines() if 'Bounding Box:' in l.decode ()][0]).groups ()]
         ye = e[1] + ' ' + e[3]
         xe = e[0] + ' ' + e[2]
         size = str ((int (e[3]) - int (e[1])) / float (params.resolution)) + ' ' + str ((int (e[2]) - int (e[0])) / float (params.resolution))
+        epsg = [l.decode () for l in lasinfo.splitlines() if 'AUTHORITY' in l.decode ()][-1]
+        epsg = epsg.replace('AUTHORITY', '').replace ('["', '').replace ('"]]', '').replace (",", ':')
         shell ('''gdal_grid \
+        -a_srs {epsg} \
         -ot {params.output_type} \
         -of "GTiff" -a {params.algorithm} \
         -tye {ye} -txe {xe} \
@@ -69,19 +79,24 @@ rule dem:
         ''')
 
 rule shp:
-    input: 'las/{year}/{region}/{sheet}.las'
+    input: 'output/las/{sheet}.las'
     output: rules.dem.input.shp
     shell: 'las2ogr -f "ESRI Shapefile" -i "{input}" -o "{output}"'
 
 rule las:
-    input: 'laz/{year}/{region}/{sheet}.laz'
+    input: 'output/laz/{sheet}.laz'
     output: rules.dem.input.las
     params:
         classes = "2"
     shell: 'las2las --input "{input}" --output "{output}" --keep-classes {params.classes}'
 
+rule clip:
+    input: HTTP.remote (expand ('kartat.kapsi.fi/files/maastotietokanta/kaikki/etrs89/gml/{clipregion}_mtk.zip', clipregion = CLIPS), insecure = True)
+    output: expand ('output/mtk/{clipregion}.shp', clipregion = CLIPS)
+    shell: 'ogr2ogr "{output}" "/vsizip/$(readlink -f {input})" Meri'
+
 rule laz:
-    input: HTTP.remote ('kartat.kapsi.fi/files/laser/etrs-tm35fin-n2000/mara_2m/{year}/{region}/1/{sheet}.laz', insecure = True)
+    input: HTTP.remote ('kartat.kapsi.fi/files/laser/etrs-tm35fin-n2000/mara_2m/{sheet}.laz', insecure = True)
     output: rules.las.input
     message: "Downloading"
     shell: 'mv "{input}" "{output}"'
