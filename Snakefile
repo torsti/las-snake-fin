@@ -99,7 +99,7 @@ rule las:
 
 rule clip:
     input: HTTP.remote (expand ('kartat.kapsi.fi/files/maastotietokanta/kaikki/etrs89/gml/{clipregion}_mtk.zip', clipregion = CLIPS), insecure = True)
-    output: expand ('output/mtk/{clipregion}.shp', clipregion = CLIPS)
+    output: expand ('mtk/{clipregion}.shp', clipregion = CLIPS)
     message: "Download and extract sea-areas from the topographic database."
     shell: 'ogr2ogr "{output}" "/vsizip/$(readlink -f {input})" Meri'
 
