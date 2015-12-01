@@ -108,3 +108,11 @@ rule laz:
     output: rules.las.input
     message: "Download laz sheet."
     shell: 'mv "{input}" "{output}"'
+
+rule clean:
+    message: "Remove generated files."
+    shell: 'rm -rf output/ las/'
+
+rule clean_remote:
+    message: "Remove downloaded files."
+    shell: 'rm -rf laz/ mtk/'
